@@ -35,7 +35,7 @@ class CdiPlayExtension(context: ApplicationLoader.Context) extends Extension {
           case playModule: Module => playModule
           case other => sys.error("Don't know how to load module " + other)
         }
-    } :+ new CdiModule(injector)
+    } :+ new CdiModule(context, injector)
 
     eagerSingletonBindings = modules.flatMap { module =>
 
@@ -79,8 +79,28 @@ class CdiPlayExtension(context: ApplicationLoader.Context) extends Extension {
             beanConfigurator.read(annotatedType)
 
           // Binding to a given provider
-          case Some(ProviderTarget(provider)) =>
-            beanConfigurator.createWith((_: CreationalContext[AnyRef]) => provider.get().asInstanceOf[AnyRef])
+          case Some(ProviderTarget(provider: Provider[AnyRef])) =>
+            // If it's not an anonymous class, we may need to inject it
+            // These checks actually return false for Scala anonymous classes for some reason
+            if (!provider.getClass.isAnonymousClass && !provider.getClass.isSynthetic) {
+
+              // We need to get an injection target for the bean so we can inject it
+              val providerType = beanManager.createAnnotatedType(provider.getClass.asInstanceOf[Class[Provider[AnyRef]]])
+              val injectionTarget = beanManager.getInjectionTargetFactory(providerType)
+                .createInjectionTarget(null)
+              lazy val injectedProvider = {
+                injectionTarget.inject(provider, beanManager.createCreationalContext(null))
+                provider
+              }
+
+              beanConfigurator.createWith { (_: CreationalContext[AnyRef]) =>
+                injectedProvider.get().asInstanceOf[AnyRef]
+              }
+            } else {
+              beanConfigurator.createWith { (_: CreationalContext[AnyRef]) =>
+                provider.get().asInstanceOf[AnyRef]
+              }
+            }
 
           // Binding to an injected provider
           case Some(ProviderConstructionTarget(providerImpl: Class[Provider[AnyRef]])) =>
@@ -94,7 +114,8 @@ class CdiPlayExtension(context: ApplicationLoader.Context) extends Extension {
             }
 
             beanConfigurator.createWith { (_: CreationalContext[AnyRef]) =>
-              injector.instanceOf(providerImpl).get()
+              val instance = injector.instanceOf(providerImpl.asInstanceOf[Class[AnyRef]])
+              instance.asInstanceOf[Provider[AnyRef]].get()
             }
 
           // Alias to another binding
@@ -140,27 +161,29 @@ class CdiPlayExtension(context: ApplicationLoader.Context) extends Extension {
     }
   }
 
-  private class CdiModule(injector: CdiInjector) extends Module {
+}
 
-    override def bindings(environment: Environment, configuration: Configuration): Seq[Binding[_]] = Seq(
-      bind[Injector].to(injector),
-      bind[play.inject.Injector].to[DelegateInjector],
-      bind[OptionalSourceMapper].to(new OptionalSourceMapper(context.sourceMapper)),
-      bind[WebCommands].to(context.webCommands),
-      bind[ApplicationLifecycle].to(context.lifecycle),
-      bind[TemporaryFileReaperConfiguration].toProvider[TemporaryFileReaperConfigurationProvider]
-    ) ++ routerBindings(environment, configuration)
+private class CdiModule(context: ApplicationLoader.Context, injector: CdiInjector) extends Module {
 
-    private def routerBindings(environment: Environment, configuration: Configuration): Seq[Binding[_]] = {
-      Router.load(environment, configuration).collect {
-        case generated if classOf[GeneratedRouter].isAssignableFrom(generated) => bind(generated).toSelf
-      }.toSeq
-    }
+  override def bindings(environment: Environment, configuration: Configuration): Seq[Binding[_]] = Seq(
+    bind[Injector].to(injector),
+    bind[play.inject.Injector].to[DelegateInjector],
+    bind[OptionalSourceMapper].to(new OptionalSourceMapper(context.sourceMapper)),
+    bind[WebCommands].to(context.webCommands),
+    bind[ApplicationLifecycle].to(context.lifecycle),
+    bind[TemporaryFileReaperConfiguration].toProvider[TemporaryFileReaperConfigurationProvider]
+  ) ++ routerBindings(environment, configuration)
+
+  private def routerBindings(environment: Environment, configuration: Configuration): Seq[Binding[_]] = {
+    Router.load(environment, configuration).collect {
+      case generated if classOf[GeneratedRouter].isAssignableFrom(generated) => bind(generated).toSelf
+    }.toSeq
   }
 }
 
 
+
 @Singleton
-class TemporaryFileReaperConfigurationProvider @Inject() (configuration: Configuration) extends Provider[TemporaryFileReaperConfiguration] {
+class TemporaryFileReaperConfigurationProvider @Inject()(configuration: Configuration) extends Provider[TemporaryFileReaperConfiguration] {
   lazy val get = TemporaryFileReaperConfiguration.fromConfiguration(configuration)
 }
