@@ -4,6 +4,7 @@ import java.lang.annotation.Annotation
 
 import javax.enterprise.inject.spi.{Bean, BeanManager}
 import javax.inject.{Inject, Singleton}
+import org.jboss.weld.exceptions.DeploymentException
 import play.api.inject.{BindingKey, Injector, QualifierClass, QualifierInstance}
 
 import scala.reflect.ClassTag
@@ -26,9 +27,24 @@ class CdiInjector @Inject() (beanManager: BeanManager) extends Injector {
   }
 
   private def lookupInstanceOf[T](clazz: Class[T], qualifiers: Array[Annotation] = Array.empty) = {
-    val beans = beanManager.getBeans(clazz, qualifiers: _*)
-    val bean = beans.iterator.next().asInstanceOf[Bean[T]]
-    beanManager.getContext(bean.getScope)
-      .get(bean, beanManager.createCreationalContext(bean))
+    val beans = beanManager.getBeans(clazz, qualifiers: _*).iterator()
+    if (beans.hasNext) {
+      val bean = beans.next().asInstanceOf[Bean[T]]
+      beanManager.getContext(bean.getScope)
+        .get(bean, beanManager.createCreationalContext(bean))
+    } else {
+      if (qualifiers.nonEmpty) {
+        throw new DeploymentException("Unable to get instance of bean of type " + clazz + " with qualifiers " + qualifiers.toList)
+      } else {
+        // Try and instantiate/inject it directly
+        val annotatedType = beanManager.createAnnotatedType(clazz)
+        val injectionTarget = beanManager.createInjectionTarget(annotatedType)
+        val context = beanManager.createCreationalContext[T](null)
+        val instance = injectionTarget.produce(context)
+        injectionTarget.inject(instance, context)
+        injectionTarget.postConstruct(instance)
+        instance
+      }
+    }
   }
 }

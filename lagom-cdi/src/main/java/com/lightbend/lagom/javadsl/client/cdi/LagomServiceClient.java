@@ -1,4 +1,4 @@
-package com.lightbend.lagom.javadsl.server.cdi;
+package com.lightbend.lagom.javadsl.client.cdi;
 
 import javax.inject.Qualifier;
 import java.lang.annotation.ElementType;
