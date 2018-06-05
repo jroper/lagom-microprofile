@@ -3,14 +3,20 @@ import play.core.PlayVersion
 def common: Seq[Setting[_]] = Seq(
   scalaVersion := "2.12.4",
   organization := "com.lightbend.lagom.microprofile",
-  version := "1.0.0-alpha-jroper-1"
+  version := "1.0.0-alpha-jroper-1",
+  publishMavenStyle := true,
+  bintrayOrganization := Some("jroper"),
+  bintrayRepository := "maven",
+  bintrayPackage := "lagom-microprofile",
+  licenses := Seq(("Apache-2.0", url("http://www.apache.org/licenses/LICENSE-2.0.html")))
 )
 
 lazy val root = (project in file("."))
   .settings(common: _*)
   .aggregate(`play-cdi`, `lagom-cdi`, `lagom-cdi-server`, `lagom-cdi-persistence`, `lagom-reactive-messaging`, `lagom-persistence-messaging`)
   .settings(
-    name := "lagom-microprofile"
+    name := "lagom-microprofile",
+    skip in publish := true
   )
 
 lazy val `play-cdi` = (project in file("play-cdi"))
@@ -85,6 +91,5 @@ lagomKafkaEnabled in ThisBuild := true
 lagomCassandraEnabled in ThisBuild := true
 
 resolvers in ThisBuild ++= Seq(
-  Resolver.mavenLocal,
   Resolver.bintrayRepo("jroper", "maven")
 )
